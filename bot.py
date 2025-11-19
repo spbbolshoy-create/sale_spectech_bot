@@ -10,6 +10,22 @@ import config
 
 bot = telebot.TeleBot(config.BOT_TOKEN)
 
+# Функция проверки администратора
+def is_admin(user_id, username=None):
+    """Проверяет, является ли пользователь администратором"""
+    # Проверка по ID
+    if user_id in config.ADMIN_IDS:
+        return True
+    
+    # Проверка по username (если передан)
+    if username and hasattr(config, 'ADMIN_USERNAMES'):
+        # Убираем @ если есть
+        clean_username = username.lstrip('@')
+        if clean_username in config.ADMIN_USERNAMES:
+            return True
+    
+    return False
+
 # Состояния для добавления объявления
 user_states = {}
 
@@ -88,10 +104,25 @@ def start_command(message):
         # Добавляем пользователя в БД
         db.add_user(user_id, username, full_name)
         
-        # Проверяем админа
-        if user_id in config.ADMIN_IDS:
+        # ОТЛАДОЧНАЯ ИНФОРМАЦИЯ
+        print(f"=== ДАННЫЕ ПОЛЬЗОВАТЕЛЯ ===")
+        print(f"ID: {user_id}")
+        print(f"Username: @{username}")
+        print(f"Full Name: {full_name}")
+        print(f"ADMIN_IDS из config: {config.ADMIN_IDS}")
+        print(f"ADMIN_USERNAMES из config: {getattr(config, 'ADMIN_USERNAMES', 'НЕ НАЙДЕНО')}")
+        print(f"Проверка по ID: {user_id in config.ADMIN_IDS}")
+        if username:
+            print(f"Проверка по username: {username in getattr(config, 'ADMIN_USERNAMES', [])}")
+        print(f"Результат is_admin: {is_admin(user_id, username)}")
+        print(f"=========================")
+        
+        # Проверяем админа с помощью новой функции
+        if is_admin(user_id, username):
+            print("✅ ПОЛЬЗОВАТЕЛЬ РАСПОЗНАН КАК АДМИНИСТРАТОР")
             bot.send_message(message.chat.id, "👑 Добро пожаловать, администратор!", reply_markup=admin_keyboard())
         else:
+            print("❌ ПОЛЬЗОВАТЕЛЬ НЕ ЯВЛЯЕТСЯ АДМИНИСТРАТОРОМ")
             bot.send_message(message.chat.id, "🚛 Добро пожаловать в бот грузовой техники!", reply_markup=main_keyboard())
     except Exception as e:
         print(f"Ошибка в start_command: {e}")
@@ -187,7 +218,7 @@ def delete_previous_ad_messages(chat_id, user_id):
     except Exception as e:
         print(f"Ошибка при удалении предыдущих сообщений: {e}")
 
-# Просмотр одобренных объявлений с пагинацией
+# Просмотр одобренных объявлений с пагинации
 @bot.message_handler(func=lambda message: message.text == '📋 Посмотреть объявления')
 def show_ads(message):
     try:
@@ -318,7 +349,7 @@ def cancel_addition(message):
         del user_states[user_id]
     
     # Возвращаем правильную клавиатуру в зависимости от пользователя
-    if user_id in config.ADMIN_IDS:
+    if is_admin(user_id, message.from_user.username):
         # Проверяем, в каком режиме находится админ
         if 'user_mode' in user_states.get(user_id, {}):
             bot.send_message(message.chat.id, "❌ Добавление объявления отменено.", reply_markup=user_admin_keyboard())
@@ -520,7 +551,7 @@ def finish_photos(message):
             notify_admin_about_new_ad(user_id, state['title'])
             
             # Определяем правильную клавиатуру для ответа
-            if user_id in config.ADMIN_IDS:
+            if is_admin(user_id, message.from_user.username):
                 # Если админ находится в пользовательском режиме
                 if any(msg.text == '👤 Пользовательский режим' for msg in [message]):
                     bot.send_message(message.chat.id, "✅ Объявление успешно отправлено на модерацию!", reply_markup=user_admin_keyboard())
@@ -675,7 +706,7 @@ def handle_my_pagination(call):
         print(f"Ошибка в handle_my_pagination: {e}")
 
 # Модерация объявлений для админа
-@bot.message_handler(func=lambda message: message.text == '⏳ Модерация' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '⏳ Модерация' and is_admin(message.from_user.id, message.from_user.username))
 def admin_moderation(message):
     try:
         ads = db.get_pending_ads()
@@ -858,7 +889,7 @@ def reject_ad(call):
         print(f"Ошибка в reject_ad: {e}")
 
 # Админские функции с пагинацией
-@bot.message_handler(func=lambda message: message.text == '📋 Все объявления' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '📋 Все объявления' and is_admin(message.from_user.id, message.from_user.username))
 def admin_all_ads(message):
     try:
         ads = db.get_all_ads()
@@ -965,7 +996,7 @@ def handle_admin_pagination(call):
         print(f"Ошибка в handle_admin_pagination: {e}")
 
 # Список номеров объявлений для админа с кликабельными номерами
-@bot.message_handler(func=lambda message: message.text == '📝 Список номеров' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '📝 Список номеров' and is_admin(message.from_user.id, message.from_user.username))
 def list_ad_ids(message):
     try:
         ads = db.get_all_ads()
@@ -1101,17 +1132,17 @@ def handle_close_list(call):
         print(f"Ошибка в handle_close_list: {e}")
 
 # Переключение в пользовательский режим для админа
-@bot.message_handler(func=lambda message: message.text == '👤 Пользовательский режим' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '👤 Пользовательский режим' and is_admin(message.from_user.id, message.from_user.username))
 def user_mode(message):
     bot.send_message(message.chat.id, "Переключено в пользовательский режим", reply_markup=user_admin_keyboard())
 
 # Возврат в админ-режим
-@bot.message_handler(func=lambda message: message.text == '👑 Админ-режим' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '👑 Админ-режим' and is_admin(message.from_user.id, message.from_user.username))
 def back_to_admin_mode(message):
     bot.send_message(message.chat.id, "Возврат в админ-режим", reply_markup=admin_keyboard())
 
 # Статистика для админа
-@bot.message_handler(func=lambda message: message.text == '📊 Статистика' and message.from_user.id in config.ADMIN_IDS)
+@bot.message_handler(func=lambda message: message.text == '📊 Статистика' and is_admin(message.from_user.id, message.from_user.username))
 def admin_stats(message):
     try:
         conn = sqlite3.connect('cargo_bot.db')
@@ -1158,12 +1189,12 @@ def handle_delete(call):
             bot.delete_message(call.message.chat.id, call.message.message_id)
             
             # Определяем правильную клавиатуру для ответа
-            if call.from_user.id in config.ADMIN_IDS:
+            if is_admin(call.from_user.id, call.from_user.username):
                 bot.send_message(call.message.chat.id, "Объявление удалено.", reply_markup=user_admin_keyboard())
             else:
                 bot.send_message(call.message.chat.id, "Объявление удалено.", reply_markup=main_keyboard())
         
-        elif call.data.startswith('admin_delete_') and call.from_user.id in config.ADMIN_IDS:
+        elif call.data.startswith('admin_delete_') and is_admin(call.from_user.id, call.from_user.username):
             ad_id = call.data.split('_')[2]
             db.delete_ad(ad_id)
             bot.answer_callback_query(call.id, "Объявление удалено администратором")
@@ -1176,7 +1207,7 @@ def handle_delete(call):
 @bot.message_handler(func=lambda message: True)
 def handle_other_messages(message):
     try:
-        if message.from_user.id in config.ADMIN_IDS:
+        if is_admin(message.from_user.id, message.from_user.username):
             # Проверяем, в каком режиме находится админ
             if hasattr(message, 'text') and message.text == '👑 Админ-режим':
                 bot.send_message(message.chat.id, "Используйте кнопки меню", reply_markup=admin_keyboard())
